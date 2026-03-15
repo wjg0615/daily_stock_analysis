@@ -737,6 +737,207 @@ class BochaSearchProvider(BaseSearchProvider):
             return '未知来源'
 
 
+class MiaoXiangSearchProvider(BaseSearchProvider):
+    """
+    妙想资讯搜索引擎（东方财富）
+    
+    特点：
+    - 基于东方财富妙想搜索能力
+    - 专为金融场景优化，信源权威
+    - 支持新闻、公告、研报、政策等金融资讯
+    - 返回结构化结果，包含关联证券信息
+    
+    文档：东方财富妙想Skills平台
+    """
+    
+    def __init__(self, api_keys: List[str]):
+        super().__init__(api_keys, "MiaoXiang")
+    
+    def _do_search(self, query: str, api_key: str, max_results: int, days: int = 7) -> SearchResponse:
+        """执行妙想资讯搜索"""
+        try:
+            import requests
+        except ImportError:
+            return SearchResponse(
+                query=query,
+                results=[],
+                provider=self.name,
+                success=False,
+                error_message="requests 未安装，请运行: pip install requests"
+            )
+        
+        try:
+            # API 端点
+            url = "https://mkapi2.dfcfs.com/finskillshub/api/claw/news-search"
+            
+            # 请求头
+            headers = {
+                'Content-Type': 'application/json',
+                'apikey': api_key
+            }
+            
+            # 请求参数
+            payload = {
+                "query": query
+            }
+            
+            # 执行搜索（带瞬时 SSL/网络错误重试）
+            response = _post_with_retry(url, headers=headers, json=payload, timeout=15)
+            
+            # 检查HTTP状态码
+            if response.status_code != 200:
+                # 尝试解析错误信息
+                try:
+                    if response.headers.get('content-type', '').startswith('application/json'):
+                        error_data = response.json()
+                        error_message = error_data.get('message', response.text)
+                    else:
+                        error_message = response.text
+                except Exception:
+                    error_message = response.text
+                
+                # 根据错误码处理
+                if response.status_code == 403:
+                    error_msg = f"API KEY无效或余额不足: {error_message}"
+                elif response.status_code == 401:
+                    error_msg = f"API KEY无效: {error_message}"
+                elif response.status_code == 400:
+                    error_msg = f"请求参数错误: {error_message}"
+                elif response.status_code == 429:
+                    error_msg = f"请求频率达到限制: {error_message}"
+                else:
+                    error_msg = f"HTTP {response.status_code}: {error_message}"
+                
+                logger.warning(f"[MiaoXiang] 搜索失败: {error_msg}")
+                
+                return SearchResponse(
+                    query=query,
+                    results=[],
+                    provider=self.name,
+                    success=False,
+                    error_message=error_msg
+                )
+            
+            # 解析响应
+            try:
+                data = response.json()
+            except ValueError as e:
+                error_msg = f"响应JSON解析失败: {str(e)}"
+                logger.error(f"[MiaoXiang] {error_msg}")
+                return SearchResponse(
+                    query=query,
+                    results=[],
+                    provider=self.name,
+                    success=False,
+                    error_message=error_msg
+                )
+            
+            # 记录原始响应到日志
+            logger.info(f"[MiaoXiang] 搜索完成，query='{query}'")
+            logger.debug(f"[MiaoXiang] 原始响应: {data}")
+            
+            # 解析搜索结果
+            # 妙想API返回格式：嵌套结构 data.data.llmSearchResponse.data
+            results = []
+            
+            # 处理嵌套的返回格式
+            items = []
+            if isinstance(data, dict):
+                # 第一层 data
+                outer_data = data.get('data', {})
+                if isinstance(outer_data, dict):
+                    # 第二层 data
+                    inner_data = outer_data.get('data', {})
+                    if isinstance(inner_data, dict):
+                        # llmSearchResponse
+                        llm_response = inner_data.get('llmSearchResponse', {})
+                        if isinstance(llm_response, dict):
+                            # 最终的 data 列表
+                            items = llm_response.get('data', [])
+                            if not isinstance(items, list):
+                                logger.warning(f"[MiaoXiang] llmSearchResponse.data 不是列表: {type(items)}")
+                                items = []
+            elif isinstance(data, list):
+                items = data
+            
+            if not items:
+                logger.info(f"[MiaoXiang] 未找到相关结果")
+                return SearchResponse(
+                    query=query,
+                    results=[],
+                    provider=self.name,
+                    success=True,
+                )
+            
+            for item in items[:max_results]:
+                if not isinstance(item, dict):
+                    continue
+                # 妙想API返回的字段名：title, content (不是 trunk)
+                title = item.get('title', '')
+                content = item.get('content', '') or item.get('trunk', '')
+                
+                # 提取关联证券信息
+                secu_list = item.get('secuList', [])
+                secu_info = ""
+                if secu_list:
+                    secu_names = [s.get('secuName', '') for s in secu_list[:3] if s.get('secuName')]
+                    if secu_names:
+                        secu_info = f"[关联证券: {', '.join(secu_names)}]"
+                
+                # 组合摘要
+                snippet = content[:500] if content else ""
+                if secu_info:
+                    snippet = f"{secu_info}\n{snippet}"
+                
+                results.append(SearchResult(
+                    title=title,
+                    snippet=snippet,
+                    url="",  # 妙想API不返回URL
+                    source="东方财富妙想",
+                    published_date=None,  # 妙想API不返回日期
+                ))
+            
+            logger.info(f"[MiaoXiang] 成功解析 {len(results)} 条结果")
+            
+            return SearchResponse(
+                query=query,
+                results=results,
+                provider=self.name,
+                success=True,
+            )
+            
+        except requests.exceptions.Timeout:
+            error_msg = "请求超时"
+            logger.error(f"[MiaoXiang] {error_msg}")
+            return SearchResponse(
+                query=query,
+                results=[],
+                provider=self.name,
+                success=False,
+                error_message=error_msg
+            )
+        except requests.exceptions.RequestException as e:
+            error_msg = f"网络请求失败: {str(e)}"
+            logger.error(f"[MiaoXiang] {error_msg}")
+            return SearchResponse(
+                query=query,
+                results=[],
+                provider=self.name,
+                success=False,
+                error_message=error_msg
+            )
+        except Exception as e:
+            error_msg = f"未知错误: {str(e)}"
+            logger.error(f"[MiaoXiang] {error_msg}")
+            return SearchResponse(
+                query=query,
+                results=[],
+                provider=self.name,
+                success=False,
+                error_message=error_msg
+            )
+
+
 class MiniMaxSearchProvider(BaseSearchProvider):
     """
     MiniMax Web Search (Coding Plan API)
@@ -1342,6 +1543,7 @@ class SearchService:
     def __init__(
         self,
         bocha_keys: Optional[List[str]] = None,
+        miaoxiang_keys: Optional[List[str]] = None,
         tavily_keys: Optional[List[str]] = None,
         brave_keys: Optional[List[str]] = None,
         serpapi_keys: Optional[List[str]] = None,
@@ -1354,6 +1556,7 @@ class SearchService:
 
         Args:
             bocha_keys: 博查搜索 API Key 列表
+            miaoxiang_keys: 妙想资讯搜索 API Key 列表（东方财富）
             tavily_keys: Tavily API Key 列表
             brave_keys: Brave Search API Key 列表
             serpapi_keys: SerpAPI Key 列表
@@ -1370,27 +1573,32 @@ class SearchService:
             self._providers.append(BochaSearchProvider(bocha_keys))
             logger.info(f"已配置 Bocha 搜索，共 {len(bocha_keys)} 个 API Key")
 
-        # 2. Tavily（免费额度更多，每月 1000 次）
+        # 2. MiaoXiang 妙想资讯（东方财富，金融场景专用）
+        if miaoxiang_keys:
+            self._providers.append(MiaoXiangSearchProvider(miaoxiang_keys))
+            logger.info(f"已配置妙想资讯搜索，共 {len(miaoxiang_keys)} 个 API Key")
+
+        # 3. Tavily（免费额度更多，每月 1000 次）
         if tavily_keys:
             self._providers.append(TavilySearchProvider(tavily_keys))
             logger.info(f"已配置 Tavily 搜索，共 {len(tavily_keys)} 个 API Key")
 
-        # 3. Brave Search（隐私优先，全球覆盖）
+        # 4. Brave Search（隐私优先，全球覆盖）
         if brave_keys:
             self._providers.append(BraveSearchProvider(brave_keys))
             logger.info(f"已配置 Brave 搜索，共 {len(brave_keys)} 个 API Key")
 
-        # 4. SerpAPI 作为备选（每月 100 次）
+        # 5. SerpAPI 作为备选（每月 100 次）
         if serpapi_keys:
             self._providers.append(SerpAPISearchProvider(serpapi_keys))
             logger.info(f"已配置 SerpAPI 搜索，共 {len(serpapi_keys)} 个 API Key")
 
-        # 5. MiniMax（Coding Plan Web Search，结构化结果）
+        # 6. MiniMax（Coding Plan Web Search，结构化结果）
         if minimax_keys:
             self._providers.append(MiniMaxSearchProvider(minimax_keys))
             logger.info(f"已配置 MiniMax 搜索，共 {len(minimax_keys)} 个 API Key")
 
-        # 6. SearXNG（自建实例，无配额兜底，最后兜底）
+        # 7. SearXNG（自建实例，无配额兜底，最后兜底）
         if searxng_base_urls:
             self._providers.append(SearXNGSearchProvider(searxng_base_urls))
             logger.info(f"已配置 SearXNG 搜索，共 {len(searxng_base_urls)} 个实例")
@@ -1972,6 +2180,7 @@ def get_search_service() -> SearchService:
         
         _search_service = SearchService(
             bocha_keys=config.bocha_api_keys,
+            miaoxiang_keys=config.miaoxiang_api_keys,
             tavily_keys=config.tavily_api_keys,
             brave_keys=config.brave_api_keys,
             serpapi_keys=config.serpapi_keys,
