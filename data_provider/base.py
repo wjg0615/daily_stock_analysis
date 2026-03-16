@@ -652,22 +652,26 @@ class DataFetcherManager:
         初始化默认数据源列表
 
         优先级动态调整逻辑：
-        - 如果配置了 TUSHARE_TOKEN：Tushare 优先级提升为 0（最高）
+        - CodebuddyFetcher 始终为最高优先级 (-2)
+        - 如果配置了 TUSHARE_TOKEN：Tushare 优先级提升为 -1
         - 否则按默认优先级：
-          0. EfinanceFetcher (Priority 0) - 最高优先级
+          0. EfinanceFetcher (Priority 0)
           1. AkshareFetcher (Priority 1)
           2. PytdxFetcher (Priority 2) - 通达信
           2. TushareFetcher (Priority 2)
           3. BaostockFetcher (Priority 3)
           4. YfinanceFetcher (Priority 4)
         """
+        from .codebuddy_fetcher import CodebuddyFetcher
         from .efinance_fetcher import EfinanceFetcher
         from .akshare_fetcher import AkshareFetcher
         from .tushare_fetcher import TushareFetcher
         from .pytdx_fetcher import PytdxFetcher
         from .baostock_fetcher import BaostockFetcher
         from .yfinance_fetcher import YfinanceFetcher
+
         # 创建所有数据源实例（优先级在各 Fetcher 的 __init__ 中确定）
+        codebuddy = CodebuddyFetcher()  # 最高优先级 (-2)
         efinance = EfinanceFetcher()
         akshare = AkshareFetcher()
         tushare = TushareFetcher()  # 会根据 Token 配置自动调整优先级
@@ -677,6 +681,7 @@ class DataFetcherManager:
 
         # 初始化数据源列表
         self._fetchers = [
+            codebuddy,
             efinance,
             akshare,
             tushare,
@@ -685,7 +690,7 @@ class DataFetcherManager:
             yfinance,
         ]
 
-        # 按优先级排序（Tushare 如果配置了 Token 且初始化成功，优先级为 0）
+        # 按优先级排序
         self._fetchers.sort(key=lambda f: f.priority)
 
         # 构建优先级说明
@@ -1119,8 +1124,9 @@ class DataFetcherManager:
 
         circuit_breaker = get_chip_circuit_breaker()
 
-        # 定义筹码数据源优先级列表
+        # 定义筹码数据源优先级列表（CodebuddyFetcher 优先）
         chip_sources = [
+            ("CodebuddyFetcher", "codebuddy_chip"),
             ("AkshareFetcher", "akshare_chip"),
             ("TushareFetcher", "tushare_chip"),
             ("EfinanceFetcher", "efinance_chip"),

@@ -37,8 +37,6 @@ _SCREENING_CACHE_TTL = 7200  # 2小时
 @dataclass
 class ScreeningCriteria:
     """筛选条件"""
-    change_pct_min: float = 3.0
-    change_pct_max: float = 5.0
     volume_ratio_min: float = 1.0
     volume_ratio_max: float = 5.0
     turnover_rate_min: float = 3.0
@@ -53,9 +51,9 @@ class StrategyFilter:
     """策略过滤条件"""
     require_ma_bullish: bool = True  # MA5 > MA10 > MA20
     bias_threshold: float = 5.0      # 乖离率阈值
-    require_macd_positive: bool = True  # MACD > 0 或 DIF > DEA
+    require_macd_positive: bool = True  # MACD > 0 且 DIF > DEA
     require_volume_up: bool = True      # 5日均量 > 20日均量
-    require_ma60_up: bool = True        # MA60 方向向上
+    require_ma60_up: bool = True        # MA60 斜率向上
 
 
 @dataclass
@@ -80,7 +78,8 @@ class StockScreeningService:
     """股票筛选服务"""
     
     BJ_PREFIX = ('8', '4')       # 北交所代码前缀
-    CY_PREFIX = ('300',)         # 创业板代码前缀
+    CY_PREFIX = ('300',)        # 创业板代码前缀
+    KC_PREFIX = ('688',)        # 科创板代码前缀
     
     def __init__(self):
         pass
@@ -291,10 +290,12 @@ class StockScreeningService:
             code = str(row.get('代码', ''))
             name = str(row.get('名称', ''))
             
-            # 排除北交所、创业板
+            # 排除北交所、创业板、科创板
             if code.startswith(self.BJ_PREFIX):
                 continue
             if code.startswith(self.CY_PREFIX):
+                continue
+            if code.startswith(self.KC_PREFIX):
                 continue
             
             # 解析数值
@@ -308,9 +309,7 @@ class StockScreeningService:
             if None in (change_pct, volume_ratio, turnover_rate, circ_mv, price):
                 continue
             
-            # 初步筛选条件
-            if not (criteria.change_pct_min <= change_pct <= criteria.change_pct_max):
-                continue
+            # 初步筛选条件（不含涨跌幅）
             if not (criteria.volume_ratio_min <= volume_ratio <= criteria.volume_ratio_max):
                 continue
             if not (criteria.turnover_rate_min <= turnover_rate <= criteria.turnover_rate_max):
@@ -418,21 +417,14 @@ class StockScreeningService:
                     else:
                         stock.volume_status = "缩量"
                 
-                # 5. MA60 连续3天向上判断
+                # 5. MA60 斜率>0判断（今日MA60 > 昨日MA60）
                 ma60_up = False
-                if len(df) >= 4:
-                    ma60_last3 = df['ma60'].iloc[-4:]  # 最近4天的MA60
-                    if all(pd.notna(ma60_last3)):
-                        # 检查连续3天向上（今天>昨天>前天）
-                        if ma60_last3.iloc[-1] > ma60_last3.iloc[-2] > ma60_last3.iloc[-3]:
-                            ma60_up = True
-                            stock.ma60_status = "连3日↑"
-                        elif ma60_last3.iloc[-1] > ma60_last3.iloc[-2]:
-                            stock.ma60_status = "向上"
-                        elif ma60_last3.iloc[-1] < ma60_last3.iloc[-2]:
-                            stock.ma60_status = "向下"
-                        else:
-                            stock.ma60_status = "走平"
+                if pd.notna(ma60) and pd.notna(ma60_prev):
+                    if ma60 > ma60_prev:
+                        ma60_up = True
+                        stock.ma60_status = "斜率↑"
+                    else:
+                        stock.ma60_status = "斜率↓"
                 
                 # 策略判断
                 passed = True
@@ -475,8 +467,6 @@ class StockScreeningService:
 
 
 def screen_stocks(
-    change_pct_min: float = 3.0,
-    change_pct_max: float = 5.0,
     volume_ratio_min: float = 1.0,
     volume_ratio_max: float = 5.0,
     turnover_rate_min: float = 5.0,
@@ -491,7 +481,6 @@ def screen_stocks(
     便捷筛选函数
     
     Args:
-        change_pct_min/max: 涨跌幅范围
         volume_ratio_min/max: 量比范围
         turnover_rate_min/max: 换手率范围
         circ_mv_min_yi/max_yi: 流通市值范围（单位：亿）
@@ -503,8 +492,6 @@ def screen_stocks(
         股票代码列表
     """
     criteria = ScreeningCriteria(
-        change_pct_min=change_pct_min,
-        change_pct_max=change_pct_max,
         volume_ratio_min=volume_ratio_min,
         volume_ratio_max=volume_ratio_max,
         turnover_rate_min=turnover_rate_min,
@@ -520,3 +507,94 @@ def screen_stocks(
     
     service = StockScreeningService()
     return service.get_stock_codes_only(criteria, strategy, apply_strategy)
+
+
+def screen_stocks_mx(
+    keyword: str = "量比1到5，换手率3%到10%，流通市值50亿到200亿，非北交所，非创业板，非科创板，非新股，MA5大于MA10大于MA20，乖离率小于等于5%，MACD大于0且DIF大于DEA，5日均量大于20日均量，MA60向上",
+    page_size: int = 50
+) -> List[str]:
+    """
+    使用妙想智能选股接口筛选股票
+    
+    Args:
+        keyword: 自然语言选股条件
+        page_size: 返回数量限制
+        
+    Returns:
+        股票代码列表
+    """
+    import requests
+    
+    apikey = os.environ.get("MX_APIKEY") or os.environ.get("MX_APIKEYS")
+    if not apikey:
+        logger.warning("[筛选] MX_APIKEY 未配置，无法使用妙想选股")
+        return []
+    
+    url = "https://mkapi2.dfcfs.com/finskillshub/api/claw/stock-screen"
+    headers = {
+        "Content-Type": "application/json",
+        "apikey": apikey
+    }
+    data = {
+        "keyword": keyword,
+        "pageNo": 1,
+        "pageSize": page_size
+    }
+    
+    try:
+        logger.info(f"[筛选] 妙想选股条件: {keyword}")
+        response = requests.post(url, headers=headers, json=data, timeout=60)
+        response.raise_for_status()
+        result = response.json()
+        
+        if result.get("status") != 0:
+            logger.warning(f"[筛选] 妙想选股失败: {result.get('message')}")
+            return []
+        
+        inner_data = result.get("data", {}).get("data", {})
+        if inner_data.get("protocolType") != "SELECT_STOCK":
+            logger.warning("[筛选] 非选股结果")
+            return []
+        
+        count = inner_data.get("securityCount", 0)
+        logger.info(f"[筛选] 妙想选股成功，共 {count} 只股票")
+        
+        # 解析股票列表
+        partial = inner_data.get("partialResults", "")
+        codes = _parse_mx_table(partial)
+        
+        return codes
+        
+    except Exception as e:
+        logger.error(f"[筛选] 妙想选股异常: {e}")
+        return []
+
+
+def _parse_mx_table(table_str: str) -> List[str]:
+    """解析妙想选股返回的表格数据"""
+    codes = []
+    lines = table_str.strip().split("\n")
+    
+    for i, line in enumerate(lines):
+        if line.startswith("|序号|"):
+            headers = [h.strip() for h in line.split("|")[1:-1]]
+            code_idx = None
+            for j, h in enumerate(headers):
+                if h == "代码":
+                    code_idx = j
+                    break
+            
+            if code_idx is None:
+                break
+            
+            for data_line in lines[i+2:]:
+                if not data_line.strip() or not data_line.startswith("|"):
+                    continue
+                cells = [c.strip() for c in data_line.split("|")[1:-1]]
+                if code_idx < len(cells):
+                    code = cells[code_idx]
+                    if code:
+                        codes.append(code)
+            break
+    
+    return codes
