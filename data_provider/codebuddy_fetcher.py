@@ -352,6 +352,61 @@ class CodebuddyFetcher(BaseFetcher):
         return df
 
     # ============================================
+    # 股票名称获取
+    # ============================================
+
+    def get_stock_name(self, stock_code: str) -> Optional[str]:
+        """
+        获取股票名称
+
+        使用 CodeBuddy API 的 stock_basic 接口获取股票基本信息。
+
+        Args:
+            stock_code: 股票代码（纯数字格式，如 '600519'）
+
+        Returns:
+            股票名称，失败返回 None
+        """
+        # 美股/港股暂不支持
+        if _is_us_code(stock_code) or _is_hk_code(stock_code):
+            return None
+
+        # 检查缓存
+        if hasattr(self, '_stock_name_cache') and stock_code in self._stock_name_cache:
+            return self._stock_name_cache[stock_code]
+
+        # 初始化缓存
+        if not hasattr(self, '_stock_name_cache'):
+            self._stock_name_cache = {}
+
+        ts_code = _get_ts_code(stock_code)
+
+        try:
+            logger.info(f"[API调用] CodeBuddy stock_basic: ts_code={ts_code}")
+
+            data = self._call_api(
+                api_name="stock_basic",
+                params={"ts_code": ts_code},
+                fields="ts_code,name"
+            )
+
+            fields = data.get("fields", [])
+            items = data.get("items", [])
+
+            if items:
+                field_map = dict(zip(fields, items[0]))
+                name = field_map.get("name")
+                if name:
+                    self._stock_name_cache[stock_code] = name
+                    logger.info(f"[CodebuddyFetcher] 获取股票名称成功: {stock_code} -> {name}")
+                    return name
+
+        except Exception as e:
+            logger.debug(f"[CodebuddyFetcher] 获取股票名称失败 {stock_code}: {e}")
+
+        return None
+
+    # ============================================
     # 筹码分布数据
     # ============================================
 
@@ -424,7 +479,7 @@ class CodebuddyFetcher(BaseFetcher):
                 return None
 
             # 按日期排序取最新一条
-            recent_items.sort(key=lambda x: x[0], ascending=True)
+            recent_items.sort(key=lambda x: x[0])
             latest = recent_items[-1][1]
             field_map = dict(zip(fields, latest))
 
