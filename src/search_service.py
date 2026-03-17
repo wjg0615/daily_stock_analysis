@@ -1900,10 +1900,27 @@ class SearchService:
         dropped_old = 0
         dropped_future = 0
 
+        # 妙想 API 不返回日期，对其无日期新闻做特殊处理
+        is_miaoxiang = response.provider == "MiaoXiang"
+
         for item in response.results:
             published = self._normalize_news_publish_date(item.published_date)
             if published is None:
-                dropped_unknown += 1
+                # 妙想无日期新闻保留，其他引擎丢弃
+                if is_miaoxiang:
+                    filtered.append(
+                        SearchResult(
+                            title=item.title,
+                            snippet=item.snippet,
+                            url=item.url,
+                            source=item.source,
+                            published_date=None,
+                        )
+                    )
+                    if len(filtered) >= max_results:
+                        break
+                else:
+                    dropped_unknown += 1
                 continue
             if published < earliest:
                 dropped_old += 1
