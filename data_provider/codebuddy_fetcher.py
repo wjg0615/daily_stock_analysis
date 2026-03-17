@@ -14,6 +14,7 @@ API 说明：
 
 import logging
 import time
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
 import pandas as pd
@@ -394,8 +395,37 @@ class CodebuddyFetcher(BaseFetcher):
                 logger.warning(f"[CodebuddyFetcher] {ts_code} 无筹码分布数据")
                 return None
 
-            # 取最新一条数据
-            latest = items[-1]
+            # 日期校验：过滤出最近 30 天的数据，避免使用过期数据误导分析
+            MAX_CHIP_DATA_AGE_DAYS = 30
+            cutoff_date = datetime.now() - timedelta(days=MAX_CHIP_DATA_AGE_DAYS)
+
+            # 解析所有数据并过滤
+            recent_items = []
+            for item in items:
+                field_map = dict(zip(fields, item))
+                trade_date_str = str(field_map.get("trade_date", ""))
+                try:
+                    # trade_date 格式通常是 YYYYMMDD
+                    if len(trade_date_str) == 8:
+                        trade_date = datetime.strptime(trade_date_str, "%Y%m%d")
+                        if trade_date >= cutoff_date:
+                            recent_items.append((trade_date, item))
+                except ValueError:
+                    continue
+
+            if not recent_items:
+                # 尝试获取最新数据日期用于日志
+                latest_date_str = ""
+                if items:
+                    field_map = dict(zip(fields, items[-1]))
+                    latest_date_str = str(field_map.get("trade_date", ""))
+                logger.warning(f"[CodebuddyFetcher] {ts_code} 无最近 {MAX_CHIP_DATA_AGE_DAYS} 天筹码数据，"
+                              f"最新数据日期: {latest_date_str}，放弃使用过期数据")
+                return None
+
+            # 按日期排序取最新一条
+            recent_items.sort(key=lambda x: x[0], ascending=True)
+            latest = recent_items[-1][1]
             field_map = dict(zip(fields, latest))
 
             # 解析字段

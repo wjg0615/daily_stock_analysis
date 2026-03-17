@@ -1458,10 +1458,29 @@ class AkshareFetcher(BaseFetcher):
             
             logger.info(f"[API返回] ak.stock_cyq_em 成功: 返回 {len(df)} 天数据, 耗时 {api_elapsed:.2f}s")
             logger.debug(f"[API返回] 筹码数据列名: {list(df.columns)}")
-            
-            # 取最新一天的数据
-            latest = df.iloc[-1]
-            
+
+            # 日期校验：过滤出最近 30 天的数据，避免使用过期数据误导分析
+            MAX_CHIP_DATA_AGE_DAYS = 30
+            date_col = '日期'
+            if date_col in df.columns:
+                try:
+                    df[date_col] = pd.to_datetime(df[date_col])
+                    cutoff_date = datetime.now() - pd.Timedelta(days=MAX_CHIP_DATA_AGE_DAYS)
+                    recent_df = df[df[date_col] >= cutoff_date]
+                    if recent_df.empty:
+                        logger.warning(f"[筹码分布] {stock_code} 无最近 {MAX_CHIP_DATA_AGE_DAYS} 天数据，"
+                                      f"最新数据日期: {df[date_col].max()}，放弃使用过期数据")
+                        return None
+                    # 按日期排序取最新一条
+                    recent_df = recent_df.sort_values(date_col, ascending=True)
+                    latest = recent_df.iloc[-1]
+                except Exception as e:
+                    logger.warning(f"[筹码分布] {stock_code} 日期解析失败: {e}，尝试使用原始数据")
+                    latest = df.iloc[-1]
+            else:
+                logger.warning(f"[筹码分布] {stock_code} 数据缺少日期列，无法校验时效性")
+                latest = df.iloc[-1]
+
             # 使用 realtime_types.py 中的统一转换函数
             chip = ChipDistribution(
                 code=stock_code,
@@ -1475,7 +1494,7 @@ class AkshareFetcher(BaseFetcher):
                 cost_70_high=safe_float(latest.get('70成本-高')),
                 concentration_70=safe_float(latest.get('70集中度')),
             )
-            
+
             logger.info(f"[筹码分布] {stock_code} 日期={chip.date}: 获利比例={chip.profit_ratio:.1%}, "
                        f"平均成本={chip.avg_cost}, 90%集中度={chip.concentration_90:.2%}, "
                        f"70%集中度={chip.concentration_70:.2%}")
