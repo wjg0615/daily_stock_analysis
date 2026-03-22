@@ -93,6 +93,13 @@ function formatBrokerLabel(value: string, displayName?: string): string {
 }
 
 function buildFxRefreshFeedback(data: PortfolioFxRefreshResponse): FxRefreshFeedback {
+  if (data.refreshEnabled === false) {
+    return {
+      tone: 'neutral',
+      text: '汇率在线刷新已被禁用。',
+    };
+  }
+
   if (data.pairCount === 0) {
     return {
       tone: 'neutral',

@@ -76,6 +76,9 @@ Go to your forked repo → `Settings` → `Secrets and variables` → `Actions` 
 | `DISCORD_WEBHOOK_URL` | Discord Webhook URL ([How to create](https://support.discord.com/hc/en-us/articles/228383668)) | Optional |
 | `DISCORD_BOT_TOKEN` | Discord Bot Token (choose one with Webhook) | Optional |
 | `DISCORD_MAIN_CHANNEL_ID` | Discord Channel ID (required when using Bot) | Optional |
+| `SLACK_BOT_TOKEN` | Slack Bot Token (recommended, supports image upload; takes priority over Webhook when both set) | Optional |
+| `SLACK_CHANNEL_ID` | Slack Channel ID (required when using Bot) | Optional |
+| `SLACK_WEBHOOK_URL` | Slack Incoming Webhook URL (text only, no image support) | Optional |
 | `EMAIL_SENDER` | Sender email (e.g., `xxx@qq.com`) | Optional |
 | `EMAIL_PASSWORD` | Email authorization code (not login password) | Optional |
 | `EMAIL_RECEIVERS` | Receiver emails (comma-separated, leave empty to send to self) | Optional |
@@ -93,6 +96,7 @@ Go to your forked repo → `Settings` → `Secrets and variables` → `Actions` 
 |------------|------|:----:|
 | `SINGLE_STOCK_NOTIFY` | Single stock push mode: set to `true` to push immediately after each stock analysis | Optional |
 | `REPORT_TYPE` | Report type: `simple` (concise), `full` (complete), `brief` (3-5 sentences), Docker recommended: `full` | Optional |
+| `REPORT_LANGUAGE` | Report output language: `zh` (default Chinese) / `en` (English); also updates prompt instructions, templates, notification fallbacks, and fixed copy in the Web report view | Optional |
 | `REPORT_TEMPLATES_DIR` | Jinja2 template directory (relative to project root, default `templates`) | Optional |
 | `REPORT_RENDERER_ENABLED` | Enable Jinja2 template rendering (default `false`, zero regression) | Optional |
 | `REPORT_INTEGRITY_ENABLED` | Enable report integrity checks, retry or placeholder on missing fields (default `true`) | Optional |
@@ -181,6 +185,9 @@ Default schedule: Every weekday at **18:00 (Beijing Time)** automatic execution.
 | `DISCORD_BOT_TOKEN` | Discord Bot Token (choose one with Webhook) | Optional |
 | `DISCORD_MAIN_CHANNEL_ID` | Discord Channel ID (required when using Bot) | Optional |
 | `DISCORD_MAX_WORDS` | Discord Word Limit (default 2000 for un-upgraded servers) | Optional |
+| `SLACK_BOT_TOKEN` | Slack Bot Token (recommended, supports image upload; takes priority over Webhook when both set) | Optional |
+| `SLACK_CHANNEL_ID` | Slack Channel ID (required when using Bot) | Optional |
+| `SLACK_WEBHOOK_URL` | Slack Incoming Webhook URL (text only, no image support) | Optional |
 | `EMAIL_SENDER` | Sender email | Optional |
 | `EMAIL_PASSWORD` | Email authorization code (not login password) | Optional |
 | `EMAIL_RECEIVERS` | Receiver emails (comma-separated, leave empty to send to self) | Optional |
@@ -242,10 +249,13 @@ Default schedule: Every weekday at **18:00 (Beijing Time)** automatic execution.
 > - **US/HK stocks**: Returns `not_supported` fallback block.
 > - Any exception uses fail-open logic, only logs errors without affecting the main technical/news/chip pipeline.
 > - **Field contracts**:
+>   - `fundamental_context.belong_boards` = related board list for the stock (currently populated for A-shares only; `[]` when unavailable);
 >   - `fundamental_context.boards.data` = `sector_rankings` (sector rise/fall leaderboard, structure `{top, bottom}`);
 >   - `get_stock_info.belong_boards` = list of sectors the individual stock belongs to;
 >   - `get_stock_info.boards` is a compatibility alias, value is identical to `belong_boards` (removal considered only in major version updates);
 >   - `get_stock_info.sector_rankings` stays consistent with `fundamental_context.boards.data`.
+>   - `AnalysisReport.details.belong_boards` = related board list in structured report details;
+>   - `AnalysisReport.details.sector_rankings` = sector leaderboard in structured report details for board-linkage display.
 > - **Sector leaderboard** uses a fixed fallback order: consistent with global priority.
 > - **Timeout control** is a `best-effort` soft timeout: the stage will quickly degrade and continue execution based on the budget, but does not guarantee a hard interrupt of underlying third-party network calls.
 > - `FUNDAMENTAL_STAGE_TIMEOUT_SECONDS=1.5` indicates the target budget for the newly added fundamental stage, not a strict hard SLA.
@@ -500,6 +510,33 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/xxx/yyy
 ```bash
 DISCORD_BOT_TOKEN=your_bot_token
 DISCORD_MAIN_CHANNEL_ID=your_channel_id
+```
+
+### Slack
+
+Slack supports two push methods. When both are configured, Bot API takes priority to ensure text and images land in the same channel:
+
+**Method 1: Bot API (Recommended, supports image upload)**
+
+1. Create a Slack App: https://api.slack.com/apps → Create New App
+2. Add Bot Token Scopes: `chat:write`, `files:write`
+3. Install to workspace and get Bot Token (xoxb-...)
+4. Get Channel ID: channel details → copy channel ID at the bottom
+5. Configure environment variables:
+
+```bash
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_CHANNEL_ID=C01234567
+```
+
+**Method 2: Incoming Webhook (Simple setup, text only)**
+
+1. Create an Incoming Webhook in Slack App management page
+2. Copy the Webhook URL
+3. Configure environment variable:
+
+```bash
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T.../B.../xxx
 ```
 
 ### Pushover (iOS/Android Push)
@@ -774,6 +811,7 @@ A: Check if Actions is enabled, and if cron expression is correct (note it's UTC
 - The FX status card on the Web `/portfolio` page includes a manual refresh action.
 - The button calls the existing `POST /api/v1/portfolio/fx/refresh` endpoint and reloads snapshot/risk data only.
 - If upstream FX fetch fails, the page may still remain stale after refresh and will explain the fallback result inline.
+- When `PORTFOLIO_FX_UPDATE_ENABLED=false`, the refresh API returns an explicit disabled status and the page shows that online FX refresh is disabled instead of implying that no refreshable pairs exist.
 
 ---
 

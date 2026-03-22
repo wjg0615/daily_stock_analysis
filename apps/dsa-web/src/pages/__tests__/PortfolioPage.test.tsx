@@ -199,6 +199,8 @@ describe('PortfolioPage FX refresh', () => {
     refreshFx.mockResolvedValue({
       asOf: '2026-03-19',
       accountCount: 1,
+      refreshEnabled: true,
+      disabledReason: null,
       pairCount: 1,
       updatedCount: 1,
       staleCount: 0,
@@ -275,6 +277,8 @@ describe('PortfolioPage FX refresh', () => {
     refreshFx.mockResolvedValueOnce({
       asOf: '2026-03-19',
       accountCount: 1,
+      refreshEnabled: true,
+      disabledReason: null,
       pairCount: 0,
       updatedCount: 0,
       staleCount: 0,
@@ -289,6 +293,48 @@ describe('PortfolioPage FX refresh', () => {
 
     await waitFor(() => expect(refreshFx).toHaveBeenCalledWith({ accountId: undefined }));
     expect(await screen.findByText('当前范围无可刷新的汇率对。')).toBeInTheDocument();
+  });
+
+  it('shows disabled feedback when FX online refresh is disabled even without a disabled reason', async () => {
+    refreshFx.mockResolvedValueOnce({
+      asOf: '2026-03-19',
+      accountCount: 1,
+      refreshEnabled: false,
+      pairCount: 1,
+      updatedCount: 0,
+      staleCount: 0,
+      errorCount: 0,
+    });
+
+    render(<PortfolioPage />);
+
+    await waitForInitialLoad();
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
+
+    expect(await screen.findByText('汇率在线刷新已被禁用。')).toBeInTheDocument();
+  });
+
+  it('prefers disabled feedback over empty-pair feedback when refresh is disabled', async () => {
+    refreshFx.mockResolvedValueOnce({
+      asOf: '2026-03-19',
+      accountCount: 1,
+      refreshEnabled: false,
+      disabledReason: 'portfolio_fx_update_disabled',
+      pairCount: 0,
+      updatedCount: 0,
+      staleCount: 0,
+      errorCount: 0,
+    });
+
+    render(<PortfolioPage />);
+
+    await waitForInitialLoad();
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }));
+
+    expect(await screen.findByText('汇率在线刷新已被禁用。')).toBeInTheDocument();
+    expect(screen.queryByText('当前范围无可刷新的汇率对。')).not.toBeInTheDocument();
   });
 
   it('shows warning feedback when FX refresh still falls back to stale rates', async () => {

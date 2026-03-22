@@ -290,6 +290,8 @@ export interface PortfolioImportBrokerListResponse {
 export interface PortfolioFxRefreshResponse {
   asOf: string;
   accountCount: number;
+  refreshEnabled?: boolean;
+  disabledReason?: string | null;
   pairCount: number;
   updatedCount: number;
   staleCount: number;
