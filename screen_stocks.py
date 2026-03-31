@@ -46,8 +46,10 @@ def main():
     - MA60：斜率 > 0（向上）
     
 示例：
-  python screen_stocks.py              # 完整筛选
-  python screen_stocks.py --quick      # 快速筛选
+  python screen_stocks.py              # 完整筛选（本地策略过滤）
+  python screen_stocks.py --quick      # 快速筛选（仅初步筛选）
+  python screen_stocks.py --mx         # 妙想智能选股（自然语言筛选）
+  python screen_stocks.py --mx -a      # 妙想选股后执行AI分析
   python screen_stocks.py --analyze    # 筛选后执行AI分析
   python screen_stocks.py -a --no-notify  # 分析但不推送
   python screen_stocks.py -o codes.txt # 结果保存到文件
