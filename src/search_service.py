@@ -944,9 +944,11 @@ class MiaoXiangSearchProvider(BaseSearchProvider):
             for item in items[:max_results]:
                 if not isinstance(item, dict):
                     continue
-                # 妙想API返回的字段名：title, content (不是 trunk)
+                # 妙想API返回的字段名：title, content, date
                 title = item.get('title', '')
                 content = item.get('content', '') or item.get('trunk', '')
+                # 提取日期字段（格式如 '2026-04-01 19:38:28'）
+                published_date = item.get('date', '') or None
 
                 # 提取关联证券信息
                 secu_list = item.get('secuList', [])
@@ -966,7 +968,7 @@ class MiaoXiangSearchProvider(BaseSearchProvider):
                     snippet=snippet,
                     url="",  # 妙想API不返回URL
                     source="东方财富妙想",
-                    published_date=None,  # 妙想API不返回日期
+                    published_date=published_date,
                 ))
 
             logger.info(f"[MiaoXiang] 成功解析 {len(results)} 条结果")
