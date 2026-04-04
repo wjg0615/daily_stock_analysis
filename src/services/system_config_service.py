@@ -281,7 +281,7 @@ class SystemConfigService:
             "model": resolved_model,
             "messages": [{"role": "user", "content": "Reply with OK"}],
             "temperature": 0,
-            "max_tokens": 8,
+            "max_tokens": 256,  # Increased to allow MiniMax-M2.7 thinking process + response
             "timeout": max(5.0, float(timeout_seconds)),
         }
         if selected_api_key:
@@ -291,13 +291,44 @@ class SystemConfigService:
 
         try:
             import litellm
+            from src.agent.llm_adapter import LLMToolAdapter
+
+            # Register custom model pricing for MiniMax models not in LiteLLM's built-in list
+            # This must be done before litellm.completion() to prevent cost calculation errors
+            # Reuses the registration logic from LLMToolAdapter to avoid code duplication
+            LLMToolAdapter._register_custom_model_pricing()
 
             started_at = time.perf_counter()
             response = litellm.completion(**call_kwargs)
             latency_ms = int((time.perf_counter() - started_at) * 1000)
             content = ""
             if response and getattr(response, "choices", None):
-                content = str(response.choices[0].message.content or "").strip()
+                choice = response.choices[0]
+                # MiniMax-M2.7 uses content_blocks format directly on choice (not inside message)
+                # Check both possible locations for content_blocks
+                content_blocks = None
+                if hasattr(choice, "content_blocks"):
+                    content_blocks = choice.content_blocks
+                elif hasattr(choice.message, "content_blocks"):
+                    content_blocks = choice.message.content_blocks
+
+                if content_blocks:
+                    # MiniMax response format: concatenate ALL text blocks
+                    # Handle both type=="text" with .text and .content fields
+                    text_parts = []
+                    for block in content_blocks:
+                        if getattr(block, "type", None) == "text":
+                            text = getattr(block, "text", "") or ""
+                            if text:
+                                text_parts.append(text)
+                        elif hasattr(block, "content") and block.content:
+                            text_parts.append(block.content)
+                    content = "".join(text_parts).strip()
+                else:
+                    # Standard OpenAI format
+                    message = getattr(choice, "message", None)
+                    if message:
+                        content = str(message.content or "").strip()
 
             if not content:
                 return {
@@ -791,6 +822,55 @@ class SystemConfigService:
                     "severity": "error",
                     "expected": "non-empty TELEGRAM_CHAT_ID",
                     "actual": chat_id_value,
+                }
+            )
+
+        feishu_relevant_keys = {
+            "FEISHU_APP_ID",
+            "FEISHU_APP_SECRET",
+            "FEISHU_WEBHOOK_URL",
+            "FEISHU_WEBHOOK_SECRET",
+            "FEISHU_WEBHOOK_KEYWORD",
+            "FEISHU_STREAM_ENABLED",
+            "FEISHU_FOLDER_TOKEN",
+        }
+        has_feishu_app_id = bool((effective_map.get("FEISHU_APP_ID") or "").strip())
+        has_feishu_app_secret = bool((effective_map.get("FEISHU_APP_SECRET") or "").strip())
+        has_feishu_app_credentials = has_feishu_app_id or has_feishu_app_secret
+        has_feishu_webhook = bool((effective_map.get("FEISHU_WEBHOOK_URL") or "").strip())
+        has_feishu_folder_token = bool((effective_map.get("FEISHU_FOLDER_TOKEN") or "").strip())
+        has_feishu_full_cloud_doc_credentials = (
+            has_feishu_app_id
+            and has_feishu_app_secret
+            and has_feishu_folder_token
+        )
+        # Match runtime semantics: Config.from_env only enables stream mode
+        # when the value is exactly "true" (case-insensitive).
+        feishu_stream_enabled = (
+            (effective_map.get("FEISHU_STREAM_ENABLED") or "false")
+            .strip()
+            .lower()
+            == "true"
+        )
+        if (
+            has_feishu_app_credentials
+            and not has_feishu_full_cloud_doc_credentials
+            and not has_feishu_webhook
+            and not (feishu_stream_enabled and has_feishu_app_id and has_feishu_app_secret)
+            and (updated_keys & feishu_relevant_keys)
+        ):
+            issues.append(
+                {
+                    "key": "FEISHU_WEBHOOK_URL",
+                    "code": "feishu_mode_mismatch",
+                    "message": (
+                        "仅配置 FEISHU_APP_ID / FEISHU_APP_SECRET 不会开启飞书群 Webhook 推送；"
+                        "如需通知推送请填写 FEISHU_WEBHOOK_URL，若要使用应用机器人请同时开启 "
+                        "FEISHU_STREAM_ENABLED 并完成应用发布与权限配置。"
+                    ),
+                    "severity": "warning",
+                    "expected": "FEISHU_WEBHOOK_URL or FEISHU_STREAM_ENABLED=true",
+                    "actual": "app credentials only",
                 }
             )
 
