@@ -41,6 +41,77 @@ def _response(results) -> SearchResponse:
 class SearchNewsFreshnessTestCase(unittest.TestCase):
     """Tests for strategy window and strict published_date filtering."""
 
+    def test_miaoxiang_filter_keeps_results_without_date(self):
+        """妙想资讯过滤应保留无日期新闻（Issue: 妙想豁免日期过滤）。"""
+        service = SearchService(
+            news_max_age_days=7,
+            news_strategy_profile="default",
+        )
+
+        # 模拟妙想返回：有日期 + 无日期混合
+        today = datetime.now().date()
+        results = [
+            _result("新闻1（有日期）", (today - timedelta(days=1)).isoformat()),
+            _result("新闻2（无日期）", None),
+            _result("新闻3（有日期）", (today - timedelta(days=3)).isoformat()),
+            _result("新闻4（无日期）", None),
+            _result("新闻5（有日期）", (today - timedelta(days=5)).isoformat()),
+        ]
+        response = SearchResponse(
+            query="测试",
+            results=results,
+            provider="MiaoXiang",  # 妙想 Provider
+            success=True,
+        )
+
+        filtered = service._filter_news_response_miaoxiang(
+            response,
+            max_results=5,
+            log_scope="test:MiaoXiang:latest_news",
+        )
+
+        # 妙想应该保留所有新闻（包括无日期的）
+        self.assertTrue(filtered.success)
+        self.assertEqual(len(filtered.results), 5)
+        # 验证无日期新闻被保留
+        without_date_count = sum(1 for r in filtered.results if r.published_date is None)
+        self.assertEqual(without_date_count, 2)
+
+    def test_strict_filter_drops_results_without_date(self):
+        """严格过滤应丢弃无日期新闻（其他搜索引擎的行为）。"""
+        service = SearchService(
+            news_max_age_days=7,
+            news_strategy_profile="default",
+        )
+
+        today = datetime.now().date()
+        results = [
+            _result("新闻1（有日期）", (today - timedelta(days=1)).isoformat()),
+            _result("新闻2（无日期）", None),  # 应被丢弃
+            _result("新闻3（有日期）", (today - timedelta(days=3)).isoformat()),
+            _result("新闻4（无日期）", None),  # 应被丢弃
+        ]
+        response = SearchResponse(
+            query="测试",
+            results=results,
+            provider="SerpAPI",  # 非妙想 Provider
+            success=True,
+        )
+
+        filtered = service._filter_news_response(
+            response,
+            search_days=7,
+            max_results=10,
+            log_scope="test:SerpAPI:latest_news",
+        )
+
+        # 严格过滤应丢弃无日期新闻
+        self.assertTrue(filtered.success)
+        self.assertEqual(len(filtered.results), 2)
+        # 验证没有无日期新闻
+        without_date_count = sum(1 for r in filtered.results if r.published_date is None)
+        self.assertEqual(without_date_count, 0)
+
     def _create_service_with_mock_provider(
         self,
         *,

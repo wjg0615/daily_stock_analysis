@@ -2670,6 +2670,67 @@ class SearchService:
             search_time=response.search_time,
         )
 
+    def _filter_news_response_miaoxiang(
+        self,
+        response: SearchResponse,
+        *,
+        max_results: int,
+        log_scope: str,
+    ) -> SearchResponse:
+        """妙想资讯专用过滤：保留所有新闻（包括无日期），仅限制数量。
+        
+        妙想是金融专业数据源，返回的新闻已经过相关性排序，
+        即使是旧新闻或无日期新闻也可能包含重要信息（如重大公告、政策变化）。
+        """
+        if not response.success or not response.results:
+            return response
+
+        filtered: List[SearchResult] = []
+        kept_without_date = 0
+        kept_with_date = 0
+
+        for item in response.results:
+            # 妙想资讯：保留所有新闻，包括无日期的
+            normalized_date = self._normalize_news_publish_date(item.published_date)
+            
+            if normalized_date is None:
+                kept_without_date += 1
+            else:
+                kept_with_date += 1
+
+            filtered.append(
+                SearchResult(
+                    title=item.title,
+                    snippet=item.snippet,
+                    url=item.url,
+                    source=item.source,
+                    published_date=(
+                        normalized_date.isoformat() if normalized_date is not None else item.published_date
+                    ),
+                )
+            )
+            if len(filtered) >= max_results:
+                break
+
+        if kept_without_date > 0:
+            logger.info(
+                "[妙想过滤] %s: total=%s, kept=%s (with_date=%s, without_date=%s)",
+                log_scope,
+                len(response.results),
+                len(filtered),
+                kept_with_date,
+                kept_without_date,
+            )
+
+        return SearchResponse(
+            query=response.query,
+            results=filtered,
+            provider=response.provider,
+            success=response.success,
+            error_message=response.error_message,
+            search_time=response.search_time,
+        )
+
     def _normalize_and_limit_response(
         self,
         response: SearchResponse,
@@ -2828,12 +2889,22 @@ class SearchService:
                     )
 
                 response = provider.search(query, provider_max_results, days=search_days, **search_kwargs)
-                filtered_response = self._filter_news_response(
-                    response,
-                    search_days=search_days,
-                    max_results=provider_max_results,
-                    log_scope=f"{stock_code}:{provider.name}:stock_news",
-                )
+                
+                # 妙想资讯豁免严格日期过滤：保留无日期新闻
+                if provider.name == "MiaoXiang":
+                    filtered_response = self._filter_news_response_miaoxiang(
+                        response,
+                        max_results=max_results,
+                        log_scope=f"{stock_code}:{provider.name}:stock_news",
+                    )
+                else:
+                    # 其他搜索引擎严格执行日期过滤
+                    filtered_response = self._filter_news_response(
+                        response,
+                        search_days=search_days,
+                        max_results=provider_max_results,
+                        log_scope=f"{stock_code}:{provider.name}:stock_news",
+                    )
                 had_provider_success = had_provider_success or bool(response.success)
 
                 if filtered_response.success and filtered_response.results:
@@ -3150,12 +3221,21 @@ class SearchService:
                     days=search_days,
                 )
             if dim['strict_freshness']:
-                filtered_response = self._filter_news_response(
-                    response,
-                    search_days=search_days,
-                    max_results=target_per_dimension,
-                    log_scope=f"{stock_code}:{provider.name}:{dim['name']}",
-                )
+                # 妙想资讯豁免严格日期过滤：保留无日期新闻，仅限制数量
+                if provider.name == "MiaoXiang":
+                    filtered_response = self._filter_news_response_miaoxiang(
+                        response,
+                        max_results=target_per_dimension,
+                        log_scope=f"{stock_code}:{provider.name}:{dim['name']}",
+                    )
+                else:
+                    # 其他搜索引擎严格执行日期过滤
+                    filtered_response = self._filter_news_response(
+                        response,
+                        search_days=search_days,
+                        max_results=target_per_dimension,
+                        log_scope=f"{stock_code}:{provider.name}:{dim['name']}",
+                    )
             else:
                 filtered_response = self._normalize_and_limit_response(
                     response,
