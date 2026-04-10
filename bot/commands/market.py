@@ -85,6 +85,7 @@ class MarketCommand(BotCommand):
             search_service = None
             if config.has_search_capability_enabled():
                 search_service = SearchService(
+                    anspire_keys=config.anspire_api_keys,
                     bocha_keys=config.bocha_api_keys,
                     miaoxiang_keys=config.miaoxiang_api_keys,
                     tavily_keys=config.tavily_api_keys,
