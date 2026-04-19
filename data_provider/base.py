@@ -846,10 +846,8 @@ class DataFetcherManager:
         初始化默认数据源列表
 
         优先级动态调整逻辑：
-        - CodebuddyFetcher 始终为最高优先级 (-2)
         - 如果配置了 TUSHARE_TOKEN：Tushare 优先级提升为 0
         - 否则按默认优先级：
-          -2. CodebuddyFetcher (Priority -2) - 最高优先级
            0. EfinanceFetcher (Priority 0)
            1. AkshareFetcher (Priority 1)
            2. PytdxFetcher (Priority 2) - 通达信
@@ -858,7 +856,6 @@ class DataFetcherManager:
            4. YfinanceFetcher (Priority 4)
            5. LongbridgeFetcher (Priority 5) - 长桥（美股/港股兜底）
         """
-        from .codebuddy_fetcher import CodebuddyFetcher
         from .efinance_fetcher import EfinanceFetcher
         from .akshare_fetcher import AkshareFetcher
         from .tushare_fetcher import TushareFetcher
@@ -867,7 +864,6 @@ class DataFetcherManager:
         from .yfinance_fetcher import YfinanceFetcher
         from .longbridge_fetcher import LongbridgeFetcher
         # 创建所有数据源实例（优先级在各 Fetcher 的 __init__ 中确定）
-        codebuddy = CodebuddyFetcher()  # 最高优先级 (-2)
         efinance = EfinanceFetcher()
         akshare = AkshareFetcher()
         tushare = TushareFetcher()  # 会根据 Token 配置自动调整优先级
@@ -880,7 +876,6 @@ class DataFetcherManager:
         self._ensure_concurrency_guards()
         with self._fetchers_lock:
             self._fetchers = [
-                codebuddy,
                 efinance,
                 akshare,
                 tushare,
