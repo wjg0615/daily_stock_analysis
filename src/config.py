@@ -974,6 +974,7 @@ class Config:
     # === 搜索引擎配置（支持多 Key 负载均衡）===
     anspire_api_keys: List[str] = field(default_factory=list)  # Anspire Search API Keys
     bocha_api_keys: List[str] = field(default_factory=list)  # Bocha API Keys
+    miaoxiang_api_keys: List[str] = field(default_factory=list)  # 妙想资讯搜索 API Keys（东方财富）
     minimax_api_keys: List[str] = field(default_factory=list)  # MiniMax API Keys
     tavily_api_keys: List[str] = field(default_factory=list)  # Tavily API Keys
     brave_api_keys: List[str] = field(default_factory=list)  # Brave Search API Keys
@@ -1679,6 +1680,9 @@ class Config:
         bocha_keys_str = os.getenv('BOCHA_API_KEYS', '')
         bocha_api_keys = [k.strip() for k in bocha_keys_str.split(',') if k.strip()]
 
+        miaoxiang_keys_str = os.getenv('MX_APIKEYS', '')
+        miaoxiang_api_keys = [k.strip() for k in miaoxiang_keys_str.split(',') if k.strip()]
+
         minimax_keys_str = os.getenv('MINIMAX_API_KEYS', '')
         minimax_api_keys = [k.strip() for k in minimax_keys_str.split(',') if k.strip()]
         
@@ -1861,6 +1865,7 @@ class Config:
             vision_provider_priority=os.getenv('VISION_PROVIDER_PRIORITY', 'gemini,anthropic,openai'),
             anspire_api_keys=anspire_api_keys,
             bocha_api_keys=bocha_api_keys,
+            miaoxiang_api_keys=miaoxiang_api_keys,
             minimax_api_keys=minimax_api_keys,
             tavily_api_keys=tavily_api_keys,
             brave_api_keys=brave_api_keys,
@@ -2960,6 +2965,7 @@ class Config:
         return bool(
             self.anspire_api_keys
             or self.bocha_api_keys
+            or self.miaoxiang_api_keys
             or self.minimax_api_keys
             or self.tavily_api_keys
             or self.brave_api_keys
